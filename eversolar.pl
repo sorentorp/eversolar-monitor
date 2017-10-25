@@ -103,6 +103,9 @@ $config->define("pvoutput_status_interval_mins=s");
 $config->define("pvoutput_add_status_url=s");
 $config->define("influx_enabled=s");
 $config->define("influx_status_interval_mins=s");
+$config->define("influx_ip=s");
+$config->define("influx_port=s");
+$config->define("influx_db=s");
 $config->define("options_debug=s");
 $config->define("options_query_inverter_secs=s");
 $config->define("options_log_file=s");
@@ -1055,7 +1058,7 @@ print "Operation done successfully\n";
 
 #            my $cmd = `curl -is -XPOST "http://192.168.1.6:8086/write?db=eversolar" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today,ETotal=$e_total,VPV=$vpv,VPV2=$vpv2,IPV=$ipv,IPV2=$ipv2,VAC=$vac,IAC=$iac,Frequency=$frequency,Temp=$temp" `;                chomp($cmd);
 #$DB::single = 1;
- my $cmd = `curl -is -XPOST "http://192.168.1.6:8086/write?db=eversolar" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today_wh,ETotal=$e_total,Temp=$temp,VPV=$VPV,VPV2=$VPV2,IPV=$IPV2,IPV2=$IPV2,VAC=$VAC,IAC=$IAC,FREQ=$FREQUENCY"`;                chomp($cmd);
+ my $cmd = `curl -is -XPOST "http://"$influx_ip":"$influx_port"/write?db="influx_db" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today_wh,ETotal=$e_total,Temp=$temp,VPV=$VPV,VPV2=$VPV2,IPV=$IPV2,IPV2=$IPV2,VAC=$VAC,IAC=$IAC,FREQ=$FREQUENCY"`;                chomp($cmd);
             pmu_log("Severity 3, ".$inverters{$inverter}{"serial"}." uploading to influx, response: $cmd");
         }
 
