@@ -1,87 +1,3 @@
-#! /usr/bin/perl
-#
-# bugs to fix : warnings, double entries  to pvlog, max of the day
-#
-# Eversolar inverter data logger
-# - Based on Steve Cliffe's <steve@sjcnet.id.au> Eversolar PMU logger script (http://www.sjcnet.id.au/computers/eversolar-inverter-monitoring-with-linux)
-# - Tested and known to work with the following inverters:
-# -- TL1500AS Inverter connected to an ethernet to serial converter
-# -- TL2000 (multiple) connected to a Raspberry Pi
-# -- TL3000 (multiple) connected to a Raspberry Pi
-# -- Volta TL3000
-# - Supports upload of data to pvoutput.org. Please consider joining the "Eversolar perl loggers" team if you use this script - http://pvoutput.org/ladder.jsp?tid=485
-#
-# Kayne Richens <kayno@kayno.net>
-#
-# Version 0.1 - September 30 2011
-#       - first release
-# Version 0.2 - October 03 2011
-#	- fixed bug that stopped script when inverter shut down at night
-#       - moved config options to a config file (eversolar.ini)
-#       - added support for direct serial comms (no eth2ser converter) - NOT TESTED!
-#	- added "-m 30" (max run time 30 seconds) to curl so script doesn't hang when pvoutput.org goes down
-# Version 0.3 - October 12 2011
-#	- added support to upload generation to smartenergygroups.com (SEG)
-# Version 0.4 - October 16 2011
-#	- added a http server, so the inverter can be accessed via the browser
-#	- experimental multiple inverter support started - not working yet
-# Version 0.5 - October 26 2011
-#	- added paging to web server /log request
-# Version 0.6 - November 18 2011
-#	- more fixes to inverter re-connect after overnight shutdown
-#	- added max daily PAC to web interface
-# Version 0.7 - November 20 2011
-#	- added debugs to help with inverter re-connect after overnight shutdown
-#	- added the time that the max daily PAC occured to web interface
-# Version 0.8 - November 21 2011
-#	- fixed bug in 0.7 that stopped inverter connecting
-# Version 0.9 - November 23 2011
-#	- added a sleep after inverter wakes and powers up the ethernet to serial converter, to allow it time before initiating the connection
-#	- fixed the log display in the web interface when the log is not stored in the default location
-# Version 0.10 - June 7 2012
-#       - added temp and volts (PV) to pvoutput.org upload
-#
-#   Code move to http://code.google.com/p/eversolar-monitor/ - August 31 2012
-#
-#
-# Version 0.11 - March 28 2013  by Claus Stenager
-#    - added summary of more inverters, requires change in index.html
-# Version 0.12 - April 21 2013  by Henrik Jørgensen
-#    - added output to pv-log.com
-#    - fixed ripple on pvoutput with more inverters due to global min in pmu_log - hat tip leifnel
-#    - fixed temperature bug on negative centigrades - leifnel 
-#    - faster connections from  multiple inverters, as we are polling aggresively if no inverters are connected
-#    - It's now possible to specify an ini file from command line - Mads Lie Jensen
-#    - Moved web server back into mail pl file to encompass the ini file specified from command line
-#    - several minor changes, cleaning up code 
-#    - fixed issue with max production today
-#    - stopped deleting the webfile when last inverter shut down, effectively enabling the webpage after inverter shut down
-#    - Added severity to logging, and only writes to logfile if debugging is set sufficiently high
-#      Severity 1 is high severity, severity 3 is an informal message, setting debug to 3 creates a very long logfile, and slows web interface with lots of unimportant messages
-# Version 0.13 - April 21 2013  by Henrik Jørgensen
-#    - Now even faster connect, as it picks out serial numbers from database for immediate connection to inverters - Morten Friis
-#    - A few minor bugfixes
-# Version 0.14 - Jan 31st 2015  by Henrik Jørgensen
-#    - Updated to handle total production over 6553,5 KWh by reading and adding two further bytes of production data
-#
-#   Code move to https://github.com/solmoller/eversolar-monitor - August 20 2015
-#
-# Version 0.15 - Sep 5th 2015  by Henrik Jørgensen
-#    -  Bugfix september 5th 2015 for serial numbers containing null
-# Version 0.16 - January 21th 2017
-#       - added rolling 365 days production (not a year, as leap years will skew data)
-#
-#
-#
-# Eversolar communications packet definition:
-# 0xaa, 0x55, 	# header
-# 0x00, 0x00, 	# source address
-# 0x00, 0x00, 	# destination address
-# 0x00, 	# control code
-# 0x00, 	# function code
-# 0x00, 	# data length
-# 0x00...0x00	# data
-# 0x00, 0x00 	# checksum
 #
 
 use IO::Socket::INET;
@@ -101,11 +17,6 @@ $config->define("pvoutput_api_key=s");
 $config->define("pvoutput_system_id=s%");
 $config->define("pvoutput_status_interval_mins=s");
 $config->define("pvoutput_add_status_url=s");
-$config->define("influx_enabled=s");
-$config->define("influx_status_interval_mins=s");
-$config->define("influx_ip=s");
-$config->define("influx_port=s");
-$config->define("influx_db=s");
 $config->define("options_debug=s");
 $config->define("options_query_inverter_secs=s");
 $config->define("options_log_file=s");
@@ -116,7 +27,17 @@ $config->define("pvlog_FTPServeradresse=s");
 $config->define("pvlog_interval=s");
 $config->define("pvlog_username=s");
 $config->define("pvlog_Password=s");
-$config->define("seg_enabled=s");
+$config->define("domoticz_enabled=s");
+$config->define("domoticz_address=s");
+$config->define("domoticz_port=s");
+$config->define("domoticz_username=s");
+$config->define("domoticz_password=s");
+$config->define("domoticz_IDX=s");
+$config->define("influx_enabled=s");
+$config->define("influx_status_interval_mins=s");
+$config->define("influx_ip=s");
+$config->define("influx_port=s");
+$config->define("influx_db=s");$config->define("seg_enabled=s");
 $config->define("seg_upload_interval_mins=s");
 $config->define("seg_site_id=s");
 $config->define("seg_device=s");
@@ -125,24 +46,26 @@ $config->define("seg_energy_stream=s");
 $config->define("seg_api_url=s");
 $config->define("web_server_enabled=s");
 $config->define("web_server_port=s");
+$config->define("database_log=s");
+
 #$config->file("eversolar.ini");
 
 $config->define("configFile=s");
 $config->args();
- 
+
 if ($config->configFile eq '') {
     $config->configFile('eversolar.ini');
 }
- 
+
 -e $config->configFile or die "Configfile '", $config->configFile, "' not found\n";
- 
+
 $config->file($config->configFile);
 pmu_log("Severity 3, Configfile is: " . $config->configFile . "\n");
 
 
 %CTRL_FUNC_CODES = (
 	"REGISTER" => { # CONTROL CODE 0x10
-		"OFFLINE_QUERY"	=> { 
+		"OFFLINE_QUERY"	=> {
 			"REQUEST" => [0x10, 0x00],
 			"RESPONSE" => [0x10, 0x80]
 		},
@@ -194,7 +117,7 @@ if($config->options_strings == 1) {
         "OP_MODE"     => 13
     );
 } elsif($config->options_strings == 2) {
-    %DATA_BYTES = (    
+    %DATA_BYTES = (
         "TEMP"		=> 0,
         "E_TODAY"	=> 1,
         "VPV" 		=> 2,
@@ -237,7 +160,7 @@ our $dbh = DBI->connect("dbi:SQLite:db.sqlite");
 ## Web server package
 ##
 
-if($config->web_server_enabled) 
+if($config->web_server_enabled)
 {
     package SolarWebServer;
 
@@ -316,7 +239,7 @@ if($config->web_server_enabled)
             }
 
             print $line;
-    
+
             if($count == ($line_limit+($page*$line_limit))) {
                 last;
             } else {
@@ -325,7 +248,7 @@ if($config->web_server_enabled)
         }
     }
 
-} 
+}
 
 ##
 ## send packet to inverter
@@ -375,7 +298,7 @@ sub send_request {
 
     # allow time for inverter to respond
 	sleep 1;
- 
+
 
 	if($ctrl_func_code{"RESPONSE"} ne "") {
 		if($config->options_communication_method eq "eth2ser") {
@@ -540,7 +463,7 @@ sub register_inverter {
 			if($register_acknowledgement == 06) {
 				pmu_log("Severity 1, Inverter acknowledged registration");
 
-				# request inverter ID 
+				# request inverter ID
 				$inverter_id_response = send_request($next_inverter_address, $CTRL_FUNC_CODES{"READ"}{"QUERY_INVERTER_ID"});
 				if($inverter_id_response) {
 				    my $len = length($inverter_id_response);
@@ -577,11 +500,11 @@ sub register_inverter {
 ##
 ## Try to register known inverter
 ##
- 
+
 sub register_known_inverter {
               my $serial_number = shift;
         pmu_log("Severity 2: Try to register known serial number: $serial_number");
- 
+
         # send register address (serial number followed by 1 byte address we allocate to inverter)
         $serial_num_response = pack("A*", $serial_number);
         my @register_address = unpack("C*", $serial_num_response);
@@ -593,14 +516,14 @@ sub register_known_inverter {
             my $register_acknowledgement = unpack("C", $address_response);
             if($register_acknowledgement == 06) {
                 pmu_log("Severity 1:Inverter $serial_number acknowledged registration");
- 
-                # request inverter ID 
+
+                # request inverter ID
                 $inverter_id_response = send_request($next_inverter_address, $CTRL_FUNC_CODES{"READ"}{"QUERY_INVERTER_ID"});
                 if($inverter_id_response) {
                     my $len = length($inverter_id_response);
                     my $inverter_id = unpack("A*", $inverter_id_response);
                     pmu_log("Severity 1: Connected to inverter: $inverter_id");
- 
+
                     # remember this inverter
                     $timestamp = get_timestamp();
                     $inverters{$next_inverter_address}{"id_string"} = $inverter_id;
@@ -612,7 +535,7 @@ sub register_known_inverter {
                             "timestamp" => $timestamp
                         }
                     };
- 
+
                     $next_inverter_address++;
                 } else {
                     pmu_log("Severity 2: No response to 'query inverter id' request for inverter $serial_number");
@@ -693,7 +616,7 @@ sub write_web_json {
 sub upload_pvlog {
 
           # pv-log here
-                   
+
    # We've accumulated data, send data to PV-log, this could be done in more detail, specs here
    #      http://photonensammler.homedns.org/wiki/doku.php?id=solarlog_datenformat#datendatei_min_dayjs
 
@@ -722,7 +645,7 @@ sub inverter_connect {
         }
 
         $next_inverter_address = START_INVERTER_ADDRESS;
-		
+
         pmu_log("Severity 2, Asking all inverters to re-register");
 		$connected = re_register_inverters();
     }
@@ -751,7 +674,7 @@ sub get_timestamp {
 ##
 
 $dbh->do("CREATE TABLE IF NOT EXISTS inverter (
-    serial_number VARCHAR(128), 
+    serial_number VARCHAR(128),
     timestamp VARCHAR(64),
     pac INT,
     e_today FLOAT,
@@ -780,7 +703,7 @@ $dbh->do("CREATE TABLE IF NOT EXISTS inverter (
 ##
 ##
 ###############################################################################
- 
+
 
 # vpv2 and ipv2 were added in later versions - fix any existing databases that don't have the columns
 print "Update old database version, or print 2 fail messages : \n";
@@ -792,16 +715,16 @@ print "Done updating old database version.  \n";
 # First we create the table, and then we populate it with historical data. This may take a little while first time around
 #
 
-$dbh->do("drop table daily");
-
-		pmu_log("Severity 3, Checking database");
+	pmu_log("Severity 3, Checking database");
 
             my $stmt = " SELECT  COUNT(*) FROM sqlite_master WHERE type='table' AND name='daily'";
             my $sth = $dbh->prepare( $stmt );
             my $rv = $sth->execute() or die $DBI::errstr;
-             if($rv < 0){
+            my $count = $sth->fetchrow_array();
+
+             if($count < 1){
                print $DBI::errstr;
-# ok, old tadabase without the daily table. 
+# ok, old tadabase without the daily table.
 # create table and fill in data
 
   	pmu_log("Severity 1, Updating database with daily table, making data export and stats easy");
@@ -821,9 +744,9 @@ $dbh->do("drop table daily");
 		     select serial_number, date(timestamp),e_today, max(e_total) from inverter group by serial_number,date(timestamp) ";
             my $sth = $dbh->prepare( $stmt );
             my $rv = $sth->execute() or die $DBI::errstr;
-		
 
-             }   
+
+             }
 ###############################################################################
 ##
 ##
@@ -835,7 +758,7 @@ $dbh->do("drop table daily");
 ##
 ##
 ###############################################################################
- 
+
 
 if($config->web_server_enabled) {
 #    require "web-server.pl";
@@ -843,12 +766,12 @@ if($config->web_server_enabled) {
 	# start the web server on port $config->web_server_port
 	our $web_server_pid = SolarWebServer->new($config->web_server_port)->background();
 
-	$SIG{INT} = sub { 
+	$SIG{INT} = sub {
 		syswrite(STDERR, "\nCaught INT signal...\n");
-		
+
 		syswrite(STDERR, "Shutting down web server (pid $web_server_pid)...\n");
 		my $cmd = `kill -9 $web_server_pid`;
-		
+
 		syswrite(STDERR, "Exiting.\n");
 		exit;
 	};
@@ -871,11 +794,11 @@ if($config->web_server_enabled) {
 ##
 ##
 ###############################################################################
- 
+
 while(1) {
 	$timestamp = get_timestamp();
 
-        
+
 
 
 	# connect to inverter if not connected (!$sock)
@@ -898,7 +821,7 @@ while(1) {
 
                   $sth->finish();
                }
-	
+
 #aggresive polling when no inverters connected
 		while(keys(%inverters)==0) {
                  register_inverter();
@@ -924,7 +847,7 @@ while(1) {
 
             my $len = length($response);
             my @data = parse_packet(unpack("C$len", $response));
-            
+
             my $e_today_kwh = $data[$DATA_BYTES{'E_TODAY'}]/100;
             my $e_today_wh = $e_today_kwh * 1000;
             my $e_total = $data[$DATA_BYTES{'E_TOTAL'}]/10 +$data[$DATA_BYTES{'NA_1'}]*65535/10; # NA_1 is actually upper bytes of total production
@@ -932,21 +855,17 @@ while(1) {
             if ($data[$DATA_BYTES{'TEMP'}]>=0x8000) {$data[$DATA_BYTES{'TEMP'}]-=0x10000;}  # Temperature is signed, -0.1 = 0xFFFF
             my $temp = $data[$DATA_BYTES{'TEMP'}]/10;
             my $volts = $data[$DATA_BYTES{'VAC'}]/10;
-						
-        		my $VAC = $data[$DATA_BYTES{'VAC'}]/10;
-            my $VPV = $data[$DATA_BYTES{'VPV'}]/10,
-            my $VPV2 =  $data[$DATA_BYTES{'VPV2'}]/10,
-            my $IPV = $data[$DATA_BYTES{'IPV'}]/10,
-            my $IPV2 = $data[$DATA_BYTES{'IPV2'}]/10,
-            my $VAC =  $data[$DATA_BYTES{'VAC'}]/10,
-            my $IAC = $data[$DATA_BYTES{'IAC'}]/10,
-            my $FREQUENCY =  $data[$DATA_BYTES{'FREQUENCY'}]/100,						
+            my $dc_volt = $data[$DATA_BYTES{'VPV'}]/10,
+        	my $dc_imp = $data[$DATA_BYTES{'IPV'}]/10,
+            my $ac_volt = $data[$DATA_BYTES{'VAC'}]/10,
+            my $ac_imp = $data[$DATA_BYTES{'IAC'}]/10,
 
             $combined_power = $combined_power +$data[$DATA_BYTES{'PAC'}];
             $combined_daykwh = $combined_daykwh +$data[$DATA_BYTES{'E_TODAY'}]/100;
 
             $d365 = $e_total ;
  # store in db
+if($config->database_log) {
 print "select min(e_total) as mins from inverter where timestamp  >=   date('now', '-1 year') and serial_number = ".$inverters{$inverter}{"serial"};
 
             my $stmt = "select min(e_total) as mins from inverter where timestamp  >=   date('now', '-365 day') and serial_number = '".$inverters{$inverter}{"serial"}."'";
@@ -964,7 +883,7 @@ print "Operation done successfully\n";
             pmu_log("Severity 3, ".$inverters{$inverter}{"serial"}." output: $pac W, Total: $e_total kWh, Today: $e_today_kwh kWh, 365 days : $d365 ");
  # store in db
 
-						
+
             $inverters{$inverter}{"data"} = {
                 "timestamp" 	=> $timestamp,
                 "pac" 		=> $data[$DATA_BYTES{'PAC'}],
@@ -983,29 +902,29 @@ print "Operation done successfully\n";
                 "op_mode" 	=> $data[$DATA_BYTES{'OP_MODE'}],
                 "temp"	 	=> $temp,
                 "total_power"	=> $combined_power,
-                "total_daykwh"	=> $combined_daykwh 
+                "total_daykwh"	=> $combined_daykwh
             };
 
             # store in db
             $dbh->do("
-                INSERT INTO inverter 
-                    (serial_number, 
-                     timestamp, 
-                     pac, 
-                     e_today, 
-                     e_total, 
-                     vpv, 
-                     vpv2, 
-                     ipv, 
-                     ipv2, 
-                     vac, 
-                     iac, 
-                     frequency, 
-                     impedance, 
-                     hours_up, 
-                     op_mode, 
-                     temp) 
-                VALUES 
+                INSERT INTO inverter
+                    (serial_number,
+                     timestamp,
+                     pac,
+                     e_today,
+                     e_total,
+                     vpv,
+                     vpv2,
+                     ipv,
+                     ipv2,
+                     vac,
+                     iac,
+                     frequency,
+                     impedance,
+                     hours_up,
+                     op_mode,
+                     temp)
+                VALUES
                     ('".$inverters{$inverter}{"serial"}."',
                      '".$inverters{$inverter}{"data"}{"timestamp"}."',
                      '".$inverters{$inverter}{"data"}{"pac"}."',
@@ -1024,6 +943,7 @@ print "Operation done successfully\n";
                      '".$inverters{$inverter}{"data"}{"temp"}."'
                     )
             ");
+}
 
             if($data[$DATA_BYTES{'PAC'}] > $inverters{$inverter}{"max"}{"pac"}{"watts"}) {
                 $inverters{$inverter}{"max"}{"pac"} = {
@@ -1037,30 +957,6 @@ print "Operation done successfully\n";
                 write_web_json();
             }
 
-
-
-###############################################################################
-        ##
-        ##
-        ##
-        ##	Data to InfluxDB
-        ##
-        ##
-        ##
-        ###############################################################################
-
-
-        if($config->influx_enabled && ($min % $config->influx_status_interval_mins) == 0 && $min != $last_min) {
-      #      my $pv_date = `date +%Y%m%d`
-      #      my $pv_time = `date +%H:%M`;
-      #      chomp($pv_date);
-      #      chomp($pv_time);
-
-#            my $cmd = `curl -is -XPOST "http://192.168.1.6:8086/write?db=eversolar" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today,ETotal=$e_total,VPV=$vpv,VPV2=$vpv2,IPV=$ipv,IPV2=$ipv2,VAC=$vac,IAC=$iac,Frequency=$frequency,Temp=$temp" `;                chomp($cmd);
-#$DB::single = 1;
- my $cmd = `curl -is -XPOST "http://"$influx_ip":"$influx_port"/write?db="influx_db" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today_wh,ETotal=$e_total,Temp=$temp,VPV=$VPV,VPV2=$VPV2,IPV=$IPV2,IPV2=$IPV2,VAC=$VAC,IAC=$IAC,FREQ=$FREQUENCY"`;                chomp($cmd);
-            pmu_log("Severity 3, ".$inverters{$inverter}{"serial"}." uploading to influx, response: $cmd");
-        }
 
             ###############################################################################
             ##
@@ -1090,6 +986,56 @@ print "Operation done successfully\n";
                 pmu_log("Severity 3, ".$inverters{$inverter}{"serial"}." uploading to pvoutput.org, response: $cmd");
 
             }
+            ###############################################################################
+            ##
+            ##
+            ##
+            ##	Data to domoticz
+            ##
+            ##
+            ##
+            ###############################################################################
+
+
+        if($config->domoticz_enabled) {
+
+            my $domoticz_address = $config->domoticz_address;
+            my $domoticz_port = $config->domoticz_port;
+            my $domoticz_username = $config->domoticz_username;
+            my $domoticz_password = $config->domoticz_password;
+            my $domoticz_IDX = $config->domoticz_IDX;
+
+            my $cmd = `curl -s -u "$domoticz_username:$domoticz_password" "http://$domoticz_address:$domoticz_port/json.htm?type=command&param=udevice&idx=$domoticz_IDX&nvalue=0&svalue=$pac;$e_today_wh"` ;
+
+
+	chomp($cmd);
+
+            pmu_log("Severity 3, ".$inverters{$inverter}{"serial"}." uploading to domoticz, response: $cmd");
+
+        }
+
+	###############################################################################
+        ##
+        ##
+        ##
+        ##	Data to InfluxDB
+        ##
+        ##
+        ##
+        ###############################################################################
+
+
+        if($config->influx_enabled && ($min % $config->influx_status_interval_mins) == 0 && $min != $last_min) {
+      #      my $pv_date = `date +%Y%m%d`
+      #      my $pv_time = `date +%H:%M`;
+      #      chomp($pv_date);
+      #      chomp($pv_time);
+
+#            my $cmd = `curl -is -XPOST "http://192.168.1.6:8086/write?db=eversolar" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today,ETotal=$e_total,VPV=$vpv,VPV2=$vpv2,IPV=$ipv,IPV2=$ipv2,VAC=$vac,IAC=$iac,Frequency=$frequency,Temp=$temp" `;                chomp($cmd);
+#$DB::single = 1;
+ my $cmd = `curl -is -XPOST "http://"$influx_ip":"$influx_port"/write?db="influx_db" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today_wh,ETotal=$e_total,Temp=$temp,VPV=$VPV,VPV2=$VPV2,IPV=$IPV2,IPV2=$IPV2,VAC=$VAC,IAC=$IAC,FREQ=$FREQUENCY"`;                chomp($cmd);
+            pmu_log("Severity 3, ".$inverters{$inverter}{"serial"}." uploading to influx, response: $cmd");
+        }
 
             ###############################################################################
             ##
@@ -1105,7 +1051,7 @@ print "Operation done successfully\n";
             if($config->seg_enabled && ($min % $config->seg_upload_interval_mins) == 0 && $min != $last_min) {
                 if($e_last_wh >= 0) { #first iteration, cant upload to seg yet
                     my $e_now_wh = $e_today_wh - $e_last_wh;
-            
+
                     my $seg_site_id = $config->seg_site_id;
                     my $seg_device = $config->seg_device;
                     my $seg_power_stream = $config->seg_power_stream;
@@ -1126,13 +1072,13 @@ print "Operation done successfully\n";
             ##
             ##
             ##
-            ##	Data to pv-log 
+            ##	Data to pv-log
             ##
             ##
             ##
             ###############################################################################
 
-                   
+
             if($config->pvlog_enabled && ($min % $config->pvlog_interval == 0 && $min != $pvlog_last_min)) {
                     # $pvlog_last_min is used to only update once per minute. IUn case of multiple inverters we would create a line per inverter in the js file.
                     $pvlog_last_min = $min;
@@ -1144,7 +1090,7 @@ print "Operation done successfully\n";
                      # export min_day.js file
 
 
-		      #  encoding = datetime | PAC in W | PDC in W| daily production up to now in Wh| UDC in V	
+		      #  encoding = datetime | PAC in W | PDC in W| daily production up to now in Wh| UDC in V
 
                       # Anlage mit zwei WR, 1.WR 3 Strings, 2.WR keine Strings mit WR Innentemperatur:
                       #   m[mi++]=?07.05.12 15:15:00|904;372;346;376;16656;403;406;404|495;532;9234;321;55?
@@ -1154,15 +1100,15 @@ print "Operation done successfully\n";
                       # Kennung, Datum, Uhrzeit | PAC WR 1 in W| PDC String 1 WR 1 in W | PDC String 2 WR 1 in W| PDC String 3 WR 1 in W		 Tages-
                       # ertrag WR 1 in Wh		 UDC String 1 WR 1 in V		 UDC String 2 WR 1 in V		 UDC String 3 WR 1 in V		 PAC WR 2 in W		 PDC WR 2 in W		 Tages-
                       # ertrag WR 2 in Wh		 UDC WR 2 in V		 Tempe-
-                      # ratur WR 2 in °C	
+                      # ratur WR 2 in °C
 
                       # So the 2 inverters basically share format, they are just divided by a simple |
 
                       # Initialize string
                     our  $update= sprintf("m\[mi++\]\=\"%02d.%02d.%02d %02d:%02d:00",$mday,$mon+1,$year-100,$hour,$min);
-                      
 
-     
+
+
                       # For each inverter, add the inverters data to the string
                       # The format is different between one and two stringed ingerters though
 
@@ -1175,14 +1121,14 @@ print "Operation done successfully\n";
                              my $pdc1 = $inverters{$inverter}{"data"}{"ipv"}*$inverters{$inverter}{"data"}{"vpv"};
                              my $pdc2 = $inverters{$inverter}{"data"}{"ipv2"}*$inverters{$inverter}{"data"}{"vpv2"};
                              $update= $update . sprintf("|%d;%d;%d;%d;%d;%d;%d",$inverters{$inverter}{"data"}{"pac"}, $pdc1,$pdc2,$inverters{$inverter}{"data"}{"e_today"}*1000,$inverters{$inverter}{"data"}{"vpv"},$inverters{$inverter}{"data"}{"vpv2"},$inverters{$inverter}{"data"}{"temp"});
-                            
+
                             }
 
 
-        
+
                        }
 
-                      # other available data is:     
+                      # other available data is:
                       #                      '".$inverters{$inverter}{"data"}{"timestamp"}."',
                       #                      '".$inverters{$inverter}{"data"}{"pac"}."',
                       #                      '".$inverters{$inverter}{"data"}{"e_today"}."',
@@ -1212,7 +1158,7 @@ print "Operation done successfully\n";
                        {
                         open (MYFILE, '>>min_day.js');
                         print MYFILE $update;
-                        close (MYFILE);      
+                        close (MYFILE);
                        }
                        else
                        {
@@ -1225,15 +1171,15 @@ print "Operation done successfully\n";
                          print $out $_;
                          }
 
-                             close $out; 
+                             close $out;
                              copy('pvlogtemp','min_day.js');
                         }
 
-                     
-                    
+
+
                      # FTP file to pv-log
                      # upload the file
-                         
+
                       eval {
                             $ftp = Net::FTP->new($config->pvlog_FTPServeradresse, Debug => 0)
                              or  warn "Cannot connect to some.host.name: $@";
@@ -1264,7 +1210,7 @@ print "Operation done successfully\n";
                               print "cleaning up after pvlog - deleting min_day.js file";
                               unlink ('min_day.js');
                               unlink ('pvlogtemp');
-                                } 
+                                }
 			}
 
                 # Delete the log file monthly to prevent the solution from filling the disk
@@ -1296,7 +1242,7 @@ print "Operation done successfully\n";
 	$last_min = $min;
 
 	sleep $config->options_query_inverter_secs;
-	
+
 }
 
 pmu_log("Severity 1, Main loop ended - about to exit - why?");
