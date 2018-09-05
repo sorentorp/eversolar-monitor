@@ -1,3 +1,91 @@
+#! /usr/bin/perl
+#
+# bugs to fix : warnings, double entries  to pvlog, max of the day
+#
+# Eversolar inverter data logger
+# - Based on Steve Cliffe's <steve@sjcnet.id.au> Eversolar PMU logger script (http://www.sjcnet.id.au/computers/eversolar-inverter-monitoring-with-linux)
+# - Tested and known to work with the following inverters:
+# -- TL1500AS Inverter connected to an ethernet to serial converter
+# -- TL2000 (multiple) connected to a Raspberry Pi
+# -- TL3000 (multiple) connected to a Raspberry Pi
+# -- Volta TL3000
+# - Supports upload of data to pvoutput.org. Please consider joining the "Eversolar perl loggers" team if you use this script - http://pvoutput.org/ladder.jsp?tid=485
+#
+# Kayne Richens <kayno@kayno.net>
+#
+# Version 0.1 - September 30 2011
+#       - first release
+# Version 0.2 - October 03 2011
+#	- fixed bug that stopped script when inverter shut down at night
+#       - moved config options to a config file (eversolar.ini)
+#       - added support for direct serial comms (no eth2ser converter) - NOT TESTED!
+#	- added "-m 30" (max run time 30 seconds) to curl so script doesn't hang when pvoutput.org goes down
+# Version 0.3 - October 12 2011
+#	- added support to upload generation to smartenergygroups.com (SEG)
+# Version 0.4 - October 16 2011
+#	- added a http server, so the inverter can be accessed via the browser
+#	- experimental multiple inverter support started - not working yet
+# Version 0.5 - October 26 2011
+#	- added paging to web server /log request
+# Version 0.6 - November 18 2011
+#	- more fixes to inverter re-connect after overnight shutdown
+#	- added max daily PAC to web interface
+# Version 0.7 - November 20 2011
+#	- added debugs to help with inverter re-connect after overnight shutdown
+#	- added the time that the max daily PAC occured to web interface
+# Version 0.8 - November 21 2011
+#	- fixed bug in 0.7 that stopped inverter connecting
+# Version 0.9 - November 23 2011
+#	- added a sleep after inverter wakes and powers up the ethernet to serial converter, to allow it time before initiating the connection
+#	- fixed the log display in the web interface when the log is not stored in the default location
+# Version 0.10 - June 7 2012
+#       - added temp and volts (PV) to pvoutput.org upload
+#
+#   Code move to http://code.google.com/p/eversolar-monitor/ - August 31 2012
+#
+#
+# Version 0.11 - March 28 2013  by Claus Stenager
+#    - added summary of more inverters, requires change in index.html
+# Version 0.12 - April 21 2013  by Henrik Jørgensen
+#    - added output to pv-log.com
+#    - fixed ripple on pvoutput with more inverters due to global min in pmu_log - hat tip leifnel
+#    - fixed temperature bug on negative centigrades - leifnel
+#    - faster connections from  multiple inverters, as we are polling aggresively if no inverters are connected
+#    - It's now possible to specify an ini file from command line - Mads Lie Jensen
+#    - Moved web server back into mail pl file to encompass the ini file specified from command line
+#    - several minor changes, cleaning up code
+#    - fixed issue with max production today
+#    - stopped deleting the webfile when last inverter shut down, effectively enabling the webpage after inverter shut down
+#    - Added severity to logging, and only writes to logfile if debugging is set sufficiently high
+#      Severity 1 is high severity, severity 3 is an informal message, setting debug to 3 creates a very long logfile, and slows web interface with lots of unimportant messages
+# Version 0.13 - April 21 2013  by Henrik Jørgensen
+#    - Now even faster connect, as it picks out serial numbers from database for immediate connection to inverters - Morten Friis
+#    - A few minor bugfixes
+# Version 0.14 - Jan 31st 2015  by Henrik Jørgensen
+#    - Updated to handle total production over 6553,5 KWh by reading and adding two further bytes of production data
+#
+#   Code move to https://github.com/solmoller/eversolar-monitor - August 20 2015
+#
+# Version 0.15 - Sep 5th 2015  by Henrik Jørgensen
+#    -  Bugfix september 5th 2015 for serial numbers containing null
+# Version 0.16 - January 21th 2017
+#       - added rolling 365 days production (not a year, as leap years will skew data)
+# Version 0.17 - december 3rd 2017 by Henrik Jørgensen and Reneke43
+#       - updated rolling 365 days to update historical data more intelligently
+#       - added Domoticz integration supplied by Reneke43
+# Version 0.171 - February 3rd 2017 by Henrik Jørgensen and Ctenberge
+#       - fixed comment bug in Domoticz integration
+#
+#
+# Eversolar communications packet definition:
+# 0xaa, 0x55, 	# header
+# 0x00, 0x00, 	# source address
+# 0x00, 0x00, 	# destination address
+# 0x00, 	# control code
+# 0x00, 	# function code
+# 0x00, 	# data length
+# 0x00...0x00	# data
+# 0x00, 0x00 	# checksum
 #
 
 use IO::Socket::INET;
@@ -33,11 +121,11 @@ $config->define("domoticz_port=s");
 $config->define("domoticz_username=s");
 $config->define("domoticz_password=s");
 $config->define("domoticz_IDX=s");
-$config->define("influx_enabled=s");
-$config->define("influx_status_interval_mins=s");
-$config->define("influx_ip=s");
-$config->define("influx_port=s");
-$config->define("influx_db=s");$config->define("seg_enabled=s");
+$config->define("influxdb_enabled=s");
+$config->define("influxdb_address=s");
+$config->define("influxdb_port=s");
+$config->define("influxdb_dbname=s");
+$config->define("seg_enabled=s");
 $config->define("seg_upload_interval_mins=s");
 $config->define("seg_site_id=s");
 $config->define("seg_device=s");
@@ -735,7 +823,6 @@ print "Done updating old database version.  \n";
 	  	 e_today float,
 		 e_total float,
 		 unique (serial_number, timestamp)
-
 		)";
             my $sth = $dbh->prepare( $stmt );
             my $rv = $sth->execute() or die $DBI::errstr;
@@ -1014,29 +1101,28 @@ print "Operation done successfully\n";
 
         }
 
-	###############################################################################
-        ##
-        ##
-        ##
-        ##	Data to InfluxDB
-        ##
-        ##
-        ##
-        ###############################################################################
+            ###############################################################################
+            ##
+            ##
+            ##
+            ##	Data to influxdb
+            ##
+            ##
+            ##
+            ###############################################################################
 
+        if($config->influxdb_enabled) {
 
-        if($config->influx_enabled && ($min % $config->influx_status_interval_mins) == 0 && $min != $last_min) {
-      #      my $pv_date = `date +%Y%m%d`
-      #      my $pv_time = `date +%H:%M`;
-      #      chomp($pv_date);
-      #      chomp($pv_time);
+            my $influxdb_address = $config->influxdb_address;
+            my $influxdb_port = $config->influxdb_port;
+            my $influxdb_dbname = $config->influxdb_dbname;
+	    
+	    my $cmd = `curl -s -i -XPOST "http://$influxdb_address:$influxdb_port/write?db=$influxdb_dbname" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today_wh,ETotal=$e_total,Temp=$temp,VPV=$VPV,VPV2=$VPV2,IPV=$IPV2,IPV2=$IPV2,VAC=$VAC,IAC=$IAC,FREQ=$FREQUENCY"`;
+		
+	    chomp($cmd);
 
-#            my $cmd = `curl -is -XPOST "http://192.168.1.6:8086/write?db=eversolar" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today,ETotal=$e_total,VPV=$vpv,VPV2=$vpv2,IPV=$ipv,IPV2=$ipv2,VAC=$vac,IAC=$iac,Frequency=$frequency,Temp=$temp" `;                chomp($cmd);
-#$DB::single = 1;
- my $cmd = `curl -is -XPOST "http://"$influx_ip":"$influx_port"/write?db="influx_db" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today_wh,ETotal=$e_total,Temp=$temp,VPV=$VPV,VPV2=$VPV2,IPV=$IPV2,IPV2=$IPV2,VAC=$VAC,IAC=$IAC,FREQ=$FREQUENCY"`;                chomp($cmd);
-            pmu_log("Severity 3, ".$inverters{$inverter}{"serial"}." uploading to influx, response: $cmd");
-        }
-
+        }	
+			
             ###############################################################################
             ##
             ##
