@@ -125,6 +125,9 @@ $config->define("influxdb_enabled=s");
 $config->define("influxdb_address=s");
 $config->define("influxdb_port=s");
 $config->define("influxdb_dbname=s");
+$config->define("influxdb_panelname=s");
+$config->define("influx_enabled=s");
+$config->define("influx_status_interval_mins=s");
 $config->define("seg_enabled=s");
 $config->define("seg_upload_interval_mins=s");
 $config->define("seg_site_id=s");
@@ -823,6 +826,7 @@ print "Done updating old database version.  \n";
 	  	 e_today float,
 		 e_total float,
 		 unique (serial_number, timestamp)
+
 		)";
             my $sth = $dbh->prepare( $stmt );
             my $rv = $sth->execute() or die $DBI::errstr;
@@ -1116,13 +1120,36 @@ print "Operation done successfully\n";
             my $influxdb_address = $config->influxdb_address;
             my $influxdb_port = $config->influxdb_port;
             my $influxdb_dbname = $config->influxdb_dbname;
-	    
-	    my $cmd = `curl -s -i -XPOST "http://$influxdb_address:$influxdb_port/write?db=$influxdb_dbname" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today_wh,ETotal=$e_total,Temp=$temp,VPV=$VPV,VPV2=$VPV2,IPV=$IPV2,IPV2=$IPV2,VAC=$VAC,IAC=$IAC,FREQ=$FREQUENCY"`;
-		
-	    chomp($cmd);
+            my $influxdb_panelname = $config->influxdb_panelname;
+            my $time = time() * 1000000000;
+        	my $cmd = `curl -s -i -XPOST "http://$influxdb_address:$influxdb_port/write?db=$influxdb_dbname" --data-binary "usage,panel=$influxdb_panelname ac_imp=$ac_imp,ac_volts=$ac_volt,dc_imp=$dc_imp,dc_volts=$dc_volt,power=$pac,temp=$temp,total=$e_total,totaltoday=$e_today_kwh $time"`;
 
-        }	
-			
+			chomp($cmd);
+
+        }
+        ###############################################################################
+        ##
+        ##
+        ##
+        ##      Data to InfluxDB
+        ##
+        ##
+        ##
+        ###############################################################################
+
+
+        if($config->influx_enabled && ($min % $config->influx_status_interval_mins) == 0 && $min != $last_min) {
+      #      my $pv_date = `date +%Y%m%d`
+      #      my $pv_time = `date +%H:%M`;
+      #      chomp($pv_date);
+      #      chomp($pv_time);
+
+
+		my $cmd = `curl -is -XPOST "http://192.168.1.6:8086/write?db=eversolar" --data-binary "inverter_Stats,Type=Energy,Interface=inverter PAC=$pac,EToday=$e_today_wh,ETotal=$e_total,Temp=$temp,VPV=$VPV,VPV2=$VPV2,IPV=$IPV2,IPV2=$IPV2,VAC=$VAC,IAC=$IAC,FREQ=$FREQUENCY"`;              
+  		chomp($cmd);
+            pmu_log("Severity 3, ".$inverters{$inverter}{"serial"}." uploading to influx, response: $cmd");
+        }
+
             ###############################################################################
             ##
             ##
